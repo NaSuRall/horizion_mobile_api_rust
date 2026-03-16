@@ -16,8 +16,8 @@ pub struct User {
     pub birth_date: Option<NaiveDate>,
     pub phone: Option<String>,
     pub pp: Option<String>,
-    pub point: u64,
-    pub created_at: NaiveDateTime,
+    pub point: Option<i32>,
+
 }
 
 #[derive(Deserialize)]
@@ -34,8 +34,7 @@ pub struct RegisterUser {
     pub pseudo: String,
     pub email: String,
     pub password: String,
-    pub phone: String,
-    pub point: u64
+    pub phone: String
 }
 
 #[derive(Debug, FromRow, Serialize, Deserialize)]
