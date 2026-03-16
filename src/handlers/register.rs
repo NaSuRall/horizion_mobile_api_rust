@@ -9,7 +9,7 @@ pub async fn register( State(state): State<AppState>, Json(body): Json<RegisterU
     let id = Uuid::new_v4();
 
     let result = sqlx::query!(
-    "INSERT INTO users (id, last_name, first_name, pseudo, email, password, phone) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO users (id, last_name, first_name, pseudo, email, password, phone, point) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     body.last_name,
     body.first_name,
@@ -17,6 +17,7 @@ pub async fn register( State(state): State<AppState>, Json(body): Json<RegisterU
     body.email,
     body.password,
     body.phone,
+    body.point
 )
         .execute(&state.db)
         .await;
