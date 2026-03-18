@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct User {
-    pub id: String,
+    pub id: Uuid,
     pub last_name: String,
     pub first_name: String,
     pub pseudo: String,

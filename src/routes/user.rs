@@ -3,8 +3,6 @@ use axum::{Router, routing::get};
 use axum::routing::post;
 use crate::handlers::{login, register};
 
-//use crate::handlers::register;
-//use crate::handlers::login;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/user", get(list_users))
