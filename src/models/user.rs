@@ -1,9 +1,18 @@
-use chrono::{NaiveDate, NaiveDateTime};
-use jsonwebtoken::signature::digest::typenum::Integer;
+use chrono::{NaiveDate};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
-
+use sqlx::Type;
+#[derive(Debug, Serialize, Deserialize, Type)]
+#[sqlx(type_name = "ENUM")]
+#[sqlx(rename_all = "PascalCase")]
+pub enum Rank {
+    Bronze,
+    Silver,
+    Gold,
+    Platine,
+    Diamond,
+}
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct User {
@@ -17,7 +26,7 @@ pub struct User {
     pub phone: Option<String>,
     pub pp: Option<String>,
     pub point: Option<i32>,
-
+    pub rank: Rank,
 }
 
 #[derive(Deserialize)]

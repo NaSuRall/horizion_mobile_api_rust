@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use jsonwebtoken::{encode, Header, EncodingKey};
 use uuid::Uuid;
 use crate::models::claim::Claims;
-use crate::models::user::{AuthUser, LoginRequest, User};
+use crate::models::user::{AuthUser, LoginRequest, User, Rank};
 
 pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Json<Value> {
 
@@ -49,7 +49,8 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
                     birth_date,
                     phone,
                     pp,
-                    point
+                    point,
+                    `rank` as "rank: Rank"
                 FROM users
                 WHERE id = ?
                 "#,
@@ -90,7 +91,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 
 fn generate_token(user_id: String) -> String {
     let expiration = Utc::now()
-        .checked_add_signed(Duration::hours(24))
+        .checked_add_signed(Duration::days(30))
         .unwrap()
         .timestamp() as usize;
 
@@ -99,10 +100,12 @@ fn generate_token(user_id: String) -> String {
         exp: expiration,
     };
 
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
+
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret("secret_key".as_ref())
+        &EncodingKey::from_secret(secret.as_bytes())
     )
         .unwrap()
 }
