@@ -1,6 +1,7 @@
 use dotenvy::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
+use tower_http::cors::{CorsLayer, Any};
 
 use crate::routes;
 
@@ -13,33 +14,33 @@ pub struct AppState {
 pub async fn main() {
     dotenv().ok();
 
-    // Charger la DATABASE_URL
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL non trouvé");
 
-    // Créer le pool SQLx
     let db = MySqlPoolOptions::new()
         .connect(&database_url)
         .await
         .expect("Impossible de se connecter à MySQL");
 
-    // Appliquer les migrations automatiquement
-    //sqlx::migrate!()
-    //  .run(&db)
-    //.await
-    //s.expect("Impossible d'appliquer les migrations");
+    sqlx::migrate!()
+        .run(&db)
+        .await
+        .expect("Impossible d'appliquer les migrations");
 
-    // Créer le state global
     let state = AppState { db };
 
-    // Charger les variables serveur
-    let address = env::var("SERVER_ADDRESS").unwrap();
-    let port = env::var("SERVER_PORT").unwrap();
+    let address = env::var("SERVER_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = env::var("SERVER_PORT").unwrap_or_else(|_| "4000".to_string());
     let server_addr = format!("{}:{}", address, port);
 
-    // Construire le routeur avec le state
-    let app = routes::create_router().with_state(state);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
-    // Lancer le serveur
+    let app = routes::create_router()
+        .with_state(state)
+        .layer(cors);
+
     let listener = tokio::net::TcpListener::bind(&server_addr).await.unwrap();
 
     println!("Server running on {}", server_addr);
