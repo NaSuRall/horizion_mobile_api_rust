@@ -1,23 +1,13 @@
-use crate::{config::AppState};
-use axum::{Router, routing::get};
-use axum::routing::post;
-use crate::handlers::{login, register};
+use crate::config::AppState;
+use axum::{Router, routing::{get, post, put}};
+use crate::handlers::{login, register, user, transaction, event};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/user", get(list_users))
-        .route("/user/{id}", get(get_user))
-        .route("/register", post(register::register))
-        .route("/login", post(login::login))
+        .route("/register",           post(register::register))
+        .route("/login",              post(login::login))
+        .route("/user/{id}",          get(user::get_user))
+        .route("/user/{id}",          put(user::put_user))
+        .route("/user/transactions",  get(transaction::get_user_transactions))
+        .route("/events",             get(event::get_events))
 }
-
-// Utilisation du Model User avec le <User>
-async fn list_users() -> &'static str {
-    "Liste des utilisateurs"
-}
-
-async fn get_user() -> &'static str {
-    "Détails d’un utilisateur"
-}
-
-

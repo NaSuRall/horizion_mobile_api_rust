@@ -3,65 +3,19 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use axum::response::IntoResponse;
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 use crate::config::AppState;
 use crate::models::Claims;
+use crate::utils::{calculate_rank, extract_user_id};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PostPoint {
     pub id: Uuid,
     pub point: i32,
-}
-
-
-fn calculate_rank(points: i32) -> &'static str {
-    match points {
-        p if p >= 5000 => "Diamond",
-        p if p >= 2500 => "Platine",
-        p if p >= 1000 => "Gold",
-        p if p >= 500  => "Silver",
-        _              => "Bronze",
-    }
-}
-
-fn extract_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Response> {
-    let auth_header = match headers.get("Authorization") {
-        Some(val) => val.to_str().unwrap_or(""),
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Token manquant" })),
-        ).into_response()),
-    };
-
-    let token = match auth_header.strip_prefix("Bearer ") {
-        Some(t) => t,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Format de token invalide" })),
-        ).into_response()),
-    };
-
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::new(Algorithm::HS256),
-    ) {
-        Ok(data) => data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Token invalide ou expiré" })),
-        ).into_response()),
-    };
-
-    Uuid::parse_str(&claims.sub).map_err(|_| (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": "UUID invalide dans le token" })),
-    ).into_response())
 }
 
 pub async fn send_point(
@@ -73,26 +27,18 @@ pub async fn send_point(
         return response;
     }
 
-    let update_result = sqlx::query(
-        "UPDATE users SET point = point + ? WHERE id = ?"
-    )
-    .bind(body.point)
-    .bind(body.id)
-    .execute(&state.db)
-    .await;
+    let update_result = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
+        .bind(body.point)
+        .bind(body.id)
+        .execute(&state.db)
+        .await;
 
     match update_result {
         Ok(r) if r.rows_affected() == 0 => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "Utilisateur introuvable" })),
-            ).into_response();
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response();
         }
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Erreur base de données" })),
-            ).into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
         }
         Ok(_) => {}
     }
@@ -102,11 +48,8 @@ pub async fn send_point(
         .fetch_one(&state.db)
         .await
     {
-        Ok(r) => r,
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "Erreur base de données" })),
-        ).into_response(),
+        Ok(r)  => r,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
     };
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -118,15 +61,23 @@ pub async fn send_point(
         .execute(&state.db)
         .await;
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "status": "success",
-            "message": "Points ajoutés avec succès",
-            "points": new_total,
-            "rank": new_rank,
-        })),
-    ).into_response()
+    // Enregistrer la transaction
+    let tx_id = Uuid::new_v4();
+    let label = format!("Ajout de {} points", body.point);
+    let _ = sqlx::query("INSERT INTO transactions (id, user_id, points, label) VALUES (?, ?, ?, ?)")
+        .bind(tx_id)
+        .bind(body.id)
+        .bind(body.point)
+        .bind(&label)
+        .execute(&state.db)
+        .await;
+
+    (StatusCode::OK, Json(json!({
+        "status":  "success",
+        "message": "Points ajoutés avec succès",
+        "points":  new_total,
+        "rank":    new_rank,
+    }))).into_response()
 }
 
 pub async fn get_user_points(
@@ -135,7 +86,7 @@ pub async fn get_user_points(
 ) -> impl IntoResponse {
     let user_id = match extract_user_id(&headers) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(r) => return r,
     };
 
     let row = match sqlx::query("SELECT point FROM users WHERE id = ?")
@@ -143,15 +94,9 @@ pub async fn get_user_points(
         .fetch_one(&state.db)
         .await
     {
-        Ok(r) => r,
-        Err(sqlx::Error::RowNotFound) => return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "Utilisateur introuvable" })),
-        ).into_response(),
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "Erreur base de données" })),
-        ).into_response(),
+        Ok(r)                         => r,
+        Err(sqlx::Error::RowNotFound) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response(),
+        Err(_)                        => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
     };
 
     let points: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -166,7 +111,7 @@ pub async fn get_qrcode_token(
 ) -> impl IntoResponse {
     let user_id = match extract_user_id(&headers) {
         Ok(id) => id,
-        Err(response) => return response,
+        Err(r) => return r,
     };
 
     let expiration = Utc::now()
@@ -178,13 +123,7 @@ pub async fn get_qrcode_token(
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
 
     match encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())) {
-        Ok(token) => (
-            StatusCode::OK,
-            Json(json!({ "token": token, "expires_in": 600 })),
-        ).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "Erreur génération token" })),
-        ).into_response(),
+        Ok(token) => (StatusCode::OK, Json(json!({ "token": token, "expires_in": 600 }))).into_response(),
+        Err(_)    => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur génération token" }))).into_response(),
     }
 }
