@@ -17,6 +17,30 @@ pub fn calculate_rank(points: i32) -> &'static str {
 }
 
 pub fn extract_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Response> {
+    let claims = decode_claims(headers)?;
+    Uuid::parse_str(&claims.sub).map_err(|_| (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": "UUID invalide dans le token" })),
+    ).into_response())
+}
+
+pub fn extract_admin_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Response> {
+    let claims = decode_claims(headers)?;
+
+    if claims.role.as_deref() != Some("admin") {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Accès refusé — droits administrateur requis" })),
+        ).into_response());
+    }
+
+    Uuid::parse_str(&claims.sub).map_err(|_| (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": "UUID invalide dans le token" })),
+    ).into_response())
+}
+
+fn decode_claims(headers: &HeaderMap) -> Result<Claims, axum::response::Response> {
     let auth_header = match headers.get("Authorization") {
         Some(val) => val.to_str().unwrap_or(""),
         None => return Err((
@@ -34,20 +58,14 @@ pub fn extract_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Resp
     };
 
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
-    let claims = match decode::<Claims>(
+    decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
-    ) {
-        Ok(data) => data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Token invalide ou expiré" })),
-        ).into_response()),
-    };
-
-    Uuid::parse_str(&claims.sub).map_err(|_| (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": "UUID invalide dans le token" })),
+    )
+    .map(|data| data.claims)
+    .map_err(|_| (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": "Token invalide ou expiré" })),
     ).into_response())
 }

@@ -41,7 +41,12 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 
             match full_user {
                 Ok(full_user) => {
-                    let token = generate_token(user.id.to_string());
+                    let role: String = sqlx::query_scalar("SELECT `role` FROM users WHERE id = ?")
+                        .bind(user.id)
+                        .fetch_one(&state.db)
+                        .await
+                        .unwrap_or_else(|_| "user".to_string());
+                    let token = generate_token(user.id.to_string(), role);
                     Json(json!({ "token": token, "user": full_user }))
                 }
                 Err(_) => Json(json!({
@@ -63,13 +68,13 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
     }
 }
 
-pub fn generate_token(user_id: String) -> String {
+pub fn generate_token(user_id: String, role: String) -> String {
     let expiration = Utc::now()
         .checked_add_signed(Duration::days(30))
         .unwrap()
         .timestamp() as usize;
 
-    let claims = Claims { sub: user_id, exp: expiration };
+    let claims = Claims { sub: user_id, exp: expiration, role: Some(role) };
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
 
     encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).unwrap()

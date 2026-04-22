@@ -2,6 +2,7 @@ use dotenvy::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 use tower_http::cors::{CorsLayer, Any};
+use tower_http::services::ServeDir;
 
 use crate::routes;
 
@@ -38,6 +39,7 @@ pub async fn main() {
         .allow_headers(Any);
 
     let app = routes::create_router()
+        .nest_service("/admin", ServeDir::new("static/admin"))
         .with_state(state)
         .layer(cors);
 

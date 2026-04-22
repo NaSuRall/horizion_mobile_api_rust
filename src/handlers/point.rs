@@ -119,7 +119,7 @@ pub async fn get_qrcode_token(
         .unwrap()
         .timestamp() as usize;
 
-    let claims = Claims { sub: user_id.to_string(), exp: expiration };
+    let claims = Claims { sub: user_id.to_string(), exp: expiration, role: None };
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
 
     match encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())) {

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Horizon Moto — Caissier</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #111; color: #fff; min-height: 100dvh;
+  }
+  h1 { font-size: 1.4rem; font-weight: 700; }
+  input, button { font-family: inherit; font-size: 1rem; }
+
+  /* ─── Login ─── */
+  #login-section {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 100dvh; padding: 24px; gap: 12px;
+  }
+  .brand { font-size: 1.8rem; font-weight: 800; letter-spacing: 2px; color: #E3000F; }
+  .brand-sub { color: #888; font-size: 0.9rem; margin-bottom: 16px; }
+  #login-section input {
+    width: 100%; max-width: 360px; background: #1A1A1A; border: 1px solid #2A2A2A;
+    border-radius: 12px; padding: 14px 16px; color: #fff; outline: none;
+  }
+  #login-section input:focus { border-color: #E3000F; }
+  #login-btn {
+    width: 100%; max-width: 360px; background: #E3000F; color: #fff;
+    border: none; border-radius: 12px; padding: 14px; font-weight: 700;
+    cursor: pointer; margin-top: 4px;
+  }
+  #login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error-msg { color: #E3000F; font-size: 0.88rem; min-height: 20px; }
+
+  /* ─── Dashboard ─── */
+  #dashboard-section { display: none; flex-direction: column; min-height: 100dvh; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #1A1A1A; border-bottom: 1px solid #2A2A2A; padding: 14px 20px;
+  }
+  #logout-btn {
+    background: none; border: 1px solid #444; color: #aaa;
+    border-radius: 8px; padding: 6px 14px; cursor: pointer; font-size: 0.85rem;
+  }
+  #logout-btn:hover { border-color: #E3000F; color: #E3000F; }
+
+  /* ─── Tabs ─── */
+  .tabs {
+    display: flex; border-bottom: 1px solid #2A2A2A;
+    background: #1A1A1A;
+  }
+  .tab-btn {
+    flex: 1; padding: 14px; background: none; border: none;
+    color: #888; cursor: pointer; font-size: 0.95rem; font-weight: 600;
+    border-bottom: 3px solid transparent; transition: all .2s;
+  }
+  .tab-btn.active { color: #E3000F; border-bottom-color: #E3000F; }
+
+  /* ─── Tab content ─── */
+  .tab-pane { display: none; flex-direction: column; gap: 14px; padding: 20px; }
+  .tab-pane.active { display: flex; }
+
+  /* ─── Camera / Scanner ─── */
+  .camera-wrap {
+    position: relative; border-radius: 16px; overflow: hidden;
+    background: #000; aspect-ratio: 4/3; width: 100%; max-width: 420px;
+    align-self: center;
+  }
+  #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .scan-frame {
+    width: 200px; height: 200px; border: 3px solid #E3000F;
+    border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,.45);
+  }
+  #canvas { display: none; }
+  #scan-hint { color: #888; font-size: 0.88rem; text-align: center; }
+
+  /* ─── Scan result card ─── */
+  .result-card {
+    display: none; flex-direction: column; gap: 12px;
+    background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 16px; padding: 20px;
+  }
+  .result-card.visible { display: flex; }
+  .badge-ok {
+    align-self: flex-start; background: #0A2A0A; border: 1px solid #2ECC71;
+    color: #2ECC71; border-radius: 8px; padding: 4px 12px; font-size: 0.85rem;
+  }
+
+  /* ─── Inputs & Buttons ─── */
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { color: #888; font-size: 0.85rem; }
+  .field input {
+    background: #111; border: 1px solid #2A2A2A; border-radius: 10px;
+    padding: 12px 14px; color: #fff; outline: none;
+  }
+  .field input:focus { border-color: #E3000F; }
+  .btn-primary {
+    background: #E3000F; color: #fff; border: none; border-radius: 12px;
+    padding: 14px; font-weight: 700; cursor: pointer; font-size: 1rem;
+  }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary {
+    background: none; color: #aaa; border: 1px solid #444; border-radius: 12px;
+    padding: 12px; cursor: pointer; font-size: 0.95rem;
+  }
+  .btn-secondary:hover { border-color: #888; color: #fff; }
+
+  /* ─── Feedback ─── */
+  .feedback {
+    border-radius: 10px; padding: 12px 14px; font-size: 0.9rem;
+    display: none;
+  }
+  .feedback.success { display: block; background: #0A2A0A; border: 1px solid #2ECC71; color: #2ECC71; }
+  .feedback.error   { display: block; background: #2A0A0A; border: 1px solid #E3000F; color: #E3000F; }
+
+  /* ─── Validate tab ─── */
+  .validate-box {
+    background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 16px; padding: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .validate-box input { text-transform: uppercase; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+
+<!-- ─── LOGIN ─── -->
+<section id="login-section">
+  <div class="brand">HORIZON MOTO</div>
+  <div class="brand-sub">Interface Caissier</div>
+  <input type="email" id="email" placeholder="Email admin" autocomplete="email">
+  <input type="password" id="password" placeholder="Mot de passe" autocomplete="current-password">
+  <button id="login-btn">Se connecter</button>
+  <div class="error-msg" id="login-error"></div>
+</section>
+
+<!-- ─── DASHBOARD ─── -->
+<section id="dashboard-section">
+  <div class="topbar">
+    <h1>Caissier</h1>
+    <button id="logout-btn">Déconnexion</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="scan">📷 Scanner QR</button>
+    <button class="tab-btn" data-tab="validate">✅ Valider code</button>
+  </div>
+
+  <!-- TAB : Scanner QR → ajouter points -->
+  <div class="tab-pane active" id="tab-scan">
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scan-overlay"><div class="scan-frame"></div></div>
+      <canvas id="canvas"></canvas>
+    </div>
+    <p id="scan-hint">Pointez la caméra vers le QR code du client</p>
+
+    <!-- Résultat après scan réussi -->
+    <div class="result-card" id="result-card">
+      <div class="badge-ok">✓ Client identifié</div>
+      <div class="field">
+        <label>Montant de l'achat (€)</label>
+        <input type="number" id="amount" placeholder="Ex : 800" min="1" step="1">
+      </div>
+      <button class="btn-primary" id="add-points-btn">Ajouter les points</button>
+      <button class="btn-secondary" id="cancel-scan-btn">Annuler — rescanner</button>
+    </div>
+
+    <div class="feedback" id="scan-feedback"></div>
+  </div>
+
+  <!-- TAB : Valider code rachat -->
+  <div class="tab-pane" id="tab-validate">
+    <div class="validate-box">
+      <div class="field">
+        <label>Code de rachat du client</label>
+        <input type="text" id="redemption-code" placeholder="HRZ-XXXX-XXXX" maxlength="12">
+      </div>
+      <button class="btn-primary" id="validate-btn">Valider le code</button>
+    </div>
+    <div class="feedback" id="validate-feedback"></div>
+  </div>
+</section>
+
+<script>
+  const API = window.location.origin;
+  let adminToken = localStorage.getItem('hz_admin_token');
+  let scannedQrToken = null;
+  let videoStream = null;
+  let scanInterval = null;
+
+  // ─── Init ───────────────────────────────────────────────
+  if (adminToken && isAdminToken(adminToken)) {
+    showDashboard();
+  }
+
+  function isAdminToken(token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return payload.role === 'admin' && payload.exp * 1000 > Date.now();
+    } catch { return false; }
+  }
+
+  // ─── Login ───────────────────────────────────────────────
+  document.getElementById('login-btn').addEventListener('click', doLogin);
+  document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  async function doLogin() {
+    const btn = document.getElementById('login-btn');
+    const err = document.getElementById('login-error');
+    btn.disabled = true;
+    err.textContent = '';
+    try {
+      const res = await fetch(`${API}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email:    document.getElementById('email').value,
+          password: document.getElementById('password').value,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.token) { err.textContent = data.message ?? 'Identifiants incorrects'; return; }
+      if (!isAdminToken(data.token)) { err.textContent = 'Accès refusé — compte non administrateur'; return; }
+      adminToken = data.token;
+      localStorage.setItem('hz_admin_token', adminToken);
+      showDashboard();
+    } catch { err.textContent = 'Impossible de contacter le serveur'; }
+    finally { btn.disabled = false; }
+  }
+
+  // ─── Logout ──────────────────────────────────────────────
+  document.getElementById('logout-btn').addEventListener('click', () => {
+    stopCamera();
+    adminToken = null;
+    localStorage.removeItem('hz_admin_token');
+    scannedQrToken = null;
+    document.getElementById('login-section').style.display = 'flex';
+    document.getElementById('dashboard-section').style.display = 'none';
+    document.getElementById('email').value = '';
+    document.getElementById('password').value = '';
+  });
+
+  // ─── Show / hide sections ────────────────────────────────
+  function showDashboard() {
+    document.getElementById('login-section').style.display = 'none';
+    document.getElementById('dashboard-section').style.display = 'flex';
+    startCamera();
+  }
+
+  // ─── Tabs ────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      if (btn.dataset.tab === 'scan') startCamera(); else stopCamera();
+    });
+  });
+
+  // ─── Camera ──────────────────────────────────────────────
+  async function startCamera() {
+    if (videoStream) return;
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+      });
+      const video = document.getElementById('video');
+      video.srcObject = videoStream;
+      await video.play();
+      scanInterval = setInterval(scanFrame, 250);
+    } catch {
+      showFeedback('scan-feedback', 'Impossible d\'accéder à la caméra. Vérifiez les permissions.', 'error');
+    }
+  }
+
+  function stopCamera() {
+    if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+    if (videoStream)  { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+    const video = document.getElementById('video');
+    video.srcObject = null;
+  }
+
+  function scanFrame() {
+    const video = document.getElementById('video');
+    if (video.readyState < video.HAVE_ENOUGH_DATA) return;
+    const canvas = document.getElementById('canvas');
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) {
+      scannedQrToken = code.data;
+      stopCamera();
+      document.getElementById('video').style.visibility = 'hidden';
+      document.getElementById('scan-hint').textContent = '';
+      document.getElementById('result-card').classList.add('visible');
+    }
+  }
+
+  // ─── Cancel scan ─────────────────────────────────────────
+  document.getElementById('cancel-scan-btn').addEventListener('click', () => {
+    scannedQrToken = null;
+    document.getElementById('result-card').classList.remove('visible');
+    document.getElementById('video').style.visibility = 'visible';
+    document.getElementById('amount').value = '';
+    document.getElementById('scan-hint').textContent = 'Pointez la caméra vers le QR code du client';
+    hideFeedback('scan-feedback');
+    startCamera();
+  });
+
+  // ─── Add points ──────────────────────────────────────────
+  document.getElementById('add-points-btn').addEventListener('click', async () => {
+    const btn    = document.getElementById('add-points-btn');
+    const amount = parseInt(document.getElementById('amount').value, 10);
+    if (!amount || amount <= 0) { showFeedback('scan-feedback', 'Entrez un montant valide', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Envoi…';
+    try {
+      const res = await fetch(`${API}/api/admin/scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ qr_token: scannedQrToken, amount }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showFeedback('scan-feedback', `✓ ${data.message} — Solde : ${data.points} pts (${data.rank})`, 'success');
+        document.getElementById('result-card').classList.remove('visible');
+        document.getElementById('video').style.visibility = 'visible';
+        document.getElementById('amount').value = '';
+        document.getElementById('scan-hint').textContent = 'Pointez la caméra vers le QR code du client';
+        scannedQrToken = null;
+        startCamera();
+      } else {
+        showFeedback('scan-feedback', data.error ?? 'Erreur serveur', 'error');
+      }
+    } catch { showFeedback('scan-feedback', 'Erreur réseau', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Ajouter les points'; }
+  });
+
+  // ─── Validate redemption code ─────────────────────────────
+  document.getElementById('validate-btn').addEventListener('click', async () => {
+    const btn  = document.getElementById('validate-btn');
+    const code = document.getElementById('redemption-code').value.trim().toUpperCase();
+    if (!code) { showFeedback('validate-feedback', 'Entrez un code de rachat', 'error'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Validation…';
+    try {
+      const res = await fetch(`${API}/api/admin/validate-redemption`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showFeedback('validate-feedback', `✓ ${data.message}`, 'success');
+        document.getElementById('redemption-code').value = '';
+      } else {
+        showFeedback('validate-feedback', data.error ?? 'Erreur serveur', 'error');
+      }
+    } catch { showFeedback('validate-feedback', 'Erreur réseau', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Valider le code'; }
+  });
+  document.getElementById('redemption-code').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('validate-btn').click();
+  });
+
+  // ─── Helpers ─────────────────────────────────────────────
+  function showFeedback(id, msg, type) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.className = 'feedback ' + type;
+  }
+  function hideFeedback(id) {
+    const el = document.getElementById(id);
+    el.className = 'feedback';
+    el.textContent = '';
+  }
+</script>
+</body>
+</html>

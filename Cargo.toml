@@ -23,6 +23,6 @@ tokio = { version = "1.50.0", features = ["full"] }
 uuid = { version = "1.22.0", features = ["v4", "serde"] }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 argon2 = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 stringprep = "=0.1.4"
 url = "=2.4.1"
