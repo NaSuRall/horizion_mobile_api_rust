@@ -6,3 +6,4 @@ pub mod transaction;
 pub mod event;
 pub mod reward;
 pub mod admin;
+pub mod oauth;

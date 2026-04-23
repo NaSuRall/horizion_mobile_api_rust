@@ -44,12 +44,13 @@ pub struct User {
     pub pseudo: String,
     pub email: String,
     #[serde(skip_serializing)]
-    pub password: String,
+    pub password: Option<String>,
     pub birth_date: Option<NaiveDate>,
     pub phone: Option<String>,
     pub pp: Option<String>,
     pub point: Option<i32>,
     pub rank: Rank,
+    pub role: String,
 }
 
 #[derive(Deserialize)]
@@ -72,5 +73,5 @@ pub struct RegisterUser {
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
-    pub password: String,
+    pub password: Option<String>,
 }

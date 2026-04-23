@@ -8,5 +8,6 @@ pub fn routes() -> Router<AppState> {
         .route("/rewards/{id}/redeem",           post(reward::redeem_reward))
         .route("/user/redemptions",              get(reward::get_user_redemptions))
         .route("/admin/scan",                    post(admin::admin_scan))
+        .route("/admin/customer-info",           post(admin::admin_customer_info))
         .route("/admin/validate-redemption",     post(admin::admin_validate_redemption))
 }

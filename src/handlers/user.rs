@@ -25,7 +25,7 @@ pub async fn get_user(
     }
 
     match sqlx::query_as::<_, crate::models::User>(
-        "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank` FROM users WHERE id = ?"
+        "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank`, `role` FROM users WHERE id = ?"
     )
     .bind(id)
     .fetch_one(&state.db)

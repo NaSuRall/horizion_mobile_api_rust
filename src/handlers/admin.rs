@@ -22,6 +22,60 @@ pub struct ValidateRedemptionRequest {
     pub code: String,
 }
 
+#[derive(Deserialize)]
+pub struct AdminCustomerInfoRequest {
+    pub qr_token: String,
+}
+
+pub async fn admin_customer_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AdminCustomerInfoRequest>,
+) -> impl IntoResponse {
+    if let Err(r) = extract_admin_user_id(&headers) {
+        return r;
+    }
+
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant");
+    let customer_id = match decode::<Claims>(
+        &body.qr_token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::new(Algorithm::HS256),
+    ) {
+        Ok(data) => match Uuid::parse_str(&data.claims.sub) {
+            Ok(id) => id,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Token QR invalide" }))).into_response(),
+        },
+        Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "QR code invalide ou expiré" }))).into_response(),
+    };
+
+    let row = match sqlx::query(
+        "SELECT first_name, last_name, email, point, `rank` FROM users WHERE id = ?",
+    )
+    .bind(customer_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response(),
+    };
+
+    let first_name: String = row.try_get("first_name").unwrap_or_default();
+    let last_name:  String = row.try_get("last_name").unwrap_or_default();
+    let email:      String = row.try_get("email").unwrap_or_default();
+    let point:      i32    = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
+    let rank:       String = row.try_get("rank").unwrap_or_else(|_| "Bronze".to_string());
+
+    (StatusCode::OK, Json(json!({
+        "user_id":    customer_id.to_string(),
+        "first_name": first_name,
+        "last_name":  last_name,
+        "email":      email,
+        "points":     point,
+        "rank":       rank,
+    }))).into_response()
+}
+
 pub async fn admin_scan(
     State(state): State<AppState>,
     headers: HeaderMap,

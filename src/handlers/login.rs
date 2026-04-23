@@ -20,7 +20,11 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 
     match user {
         Ok(Some(user)) => {
-            let parsed_hash = match PasswordHash::new(&user.password) {
+            let password_hash = match user.password.as_deref() {
+                Some(p) => p.to_string(),
+                None => return Json(json!({ "status": "error", "message": "Email ou mot de passe incorrect" })),
+            };
+            let parsed_hash = match PasswordHash::new(&password_hash) {
                 Ok(h) => h,
                 Err(_) => return Json(json!({ "status": "error", "message": "Erreur serveur" })),
             };
@@ -33,7 +37,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             }
 
             let full_user = sqlx::query_as::<_, User>(
-                "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank` FROM users WHERE id = ?"
+                "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank`, `role` FROM users WHERE id = ?"
             )
             .bind(user.id)
             .fetch_one(&state.db)
@@ -41,12 +45,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 
             match full_user {
                 Ok(full_user) => {
-                    let role: String = sqlx::query_scalar("SELECT `role` FROM users WHERE id = ?")
-                        .bind(user.id)
-                        .fetch_one(&state.db)
-                        .await
-                        .unwrap_or_else(|_| "user".to_string());
-                    let token = generate_token(user.id.to_string(), role);
+                    let token = generate_token(user.id.to_string(), full_user.role.clone());
                     Json(json!({ "token": token, "user": full_user }))
                 }
                 Err(_) => Json(json!({
