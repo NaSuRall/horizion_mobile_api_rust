@@ -27,7 +27,7 @@ pub async fn redeem_reward(
     headers: HeaderMap,
     Path(reward_id): Path<i32>,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(id) => id,
         Err(r) => return r,
     };
@@ -120,7 +120,7 @@ pub async fn get_user_redemptions(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(id) => id,
         Err(r) => return r,
     };

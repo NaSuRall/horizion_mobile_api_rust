@@ -32,14 +32,13 @@ pub async fn admin_customer_info(
     headers: HeaderMap,
     Json(body): Json<AdminCustomerInfoRequest>,
 ) -> impl IntoResponse {
-    if let Err(r) = extract_admin_user_id(&headers) {
+    if let Err(r) = extract_admin_user_id(&headers, &state.jwt_secret) {
         return r;
     }
 
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant");
     let customer_id = match decode::<Claims>(
         &body.qr_token,
-        &DecodingKey::from_secret(secret.as_bytes()),
+        &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
     ) {
         Ok(data) => match Uuid::parse_str(&data.claims.sub) {
@@ -81,18 +80,19 @@ pub async fn admin_scan(
     headers: HeaderMap,
     Json(body): Json<AdminScanRequest>,
 ) -> impl IntoResponse {
-    if let Err(r) = extract_admin_user_id(&headers) {
+    if let Err(r) = extract_admin_user_id(&headers, &state.jwt_secret) {
         return r;
     }
 
-    if body.amount <= 0 {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Le montant doit être positif" }))).into_response();
+    if body.amount <= 0 || body.amount > 10_000 {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Le montant doit être compris entre 1 et 10 000"
+        }))).into_response();
     }
 
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant");
     let customer_id = match decode::<Claims>(
         &body.qr_token,
-        &DecodingKey::from_secret(secret.as_bytes()),
+        &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
     ) {
         Ok(data) => match Uuid::parse_str(&data.claims.sub) {
@@ -156,7 +156,7 @@ pub async fn admin_validate_redemption(
     headers: HeaderMap,
     Json(body): Json<ValidateRedemptionRequest>,
 ) -> impl IntoResponse {
-    if let Err(r) = extract_admin_user_id(&headers) {
+    if let Err(r) = extract_admin_user_id(&headers, &state.jwt_secret) {
         return r;
     }
 

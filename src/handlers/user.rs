@@ -15,7 +15,7 @@ pub async fn get_user(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(uid) => uid,
         Err(r)  => return r,
     };
@@ -50,7 +50,7 @@ pub async fn put_user(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(uid) => uid,
         Err(r)  => return r,
     };
@@ -63,7 +63,18 @@ pub async fn put_user(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Aucun champ à modifier" }))).into_response();
     }
 
-    // Si changement de mot de passe : vérifier l'ancien
+    if let Some(email) = &body.email {
+        if !email.contains('@') || email.len() > 255 {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Adresse email invalide" }))).into_response();
+        }
+    }
+
+    if let Some(password) = &body.password {
+        if password.len() < 8 || password.len() > 72 {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Le mot de passe doit contenir entre 8 et 72 caractères" }))).into_response();
+        }
+    }
+
     let new_hash: Option<String> = if let Some(new_pw) = &body.password {
         let current_pw = match &body.current_password {
             Some(p) => p,
@@ -98,7 +109,6 @@ pub async fn put_user(
         None
     };
 
-    // Construire la requête UPDATE dynamique
     let mut set_parts: Vec<&str> = Vec::new();
     if new_hash.is_some()     { set_parts.push("`password` = ?"); }
     if body.email.is_some()   { set_parts.push("`email` = ?");    }

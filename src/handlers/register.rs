@@ -1,16 +1,28 @@
 use argon2::{Argon2, PasswordHasher};
 use argon2::password_hash::{rand_core::OsRng, SaltString};
-use axum::{Json, extract::State};
-use serde_json::{json, Value};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use serde_json::json;
 use uuid::Uuid;
+use validator::Validate;
 use crate::config::AppState;
 use crate::models::RegisterUser;
 
-pub async fn register(State(state): State<AppState>, Json(body): Json<RegisterUser>) -> Json<Value> {
+pub async fn register(State(state): State<AppState>, Json(body): Json<RegisterUser>) -> impl IntoResponse {
+    if let Err(e) = body.validate() {
+        let first_msg = e.field_errors()
+            .values()
+            .flat_map(|v| v.iter())
+            .next()
+            .and_then(|err| err.message.as_ref())
+            .map(|cow| cow.to_string())
+            .unwrap_or_else(|| "Données invalides".to_string());
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": first_msg }))).into_response();
+    }
+
     let salt = SaltString::generate(&mut OsRng);
     let password_hash = match Argon2::default().hash_password(body.password.as_bytes(), &salt) {
         Ok(hash) => hash.to_string(),
-        Err(_) => return Json(json!({ "status": "error", "message": "Erreur serveur" })),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur serveur" }))).into_response(),
     };
 
     let id = Uuid::new_v4();
@@ -29,12 +41,12 @@ pub async fn register(State(state): State<AppState>, Json(body): Json<RegisterUs
     .await;
 
     match result {
-        Ok(_) => Json(json!({ "status": "success", "message": "Compte créé avec succès" })),
+        Ok(_) => (StatusCode::CREATED, Json(json!({ "status": "success", "message": "Compte créé avec succès" }))).into_response(),
         Err(e) => {
             if e.to_string().contains("Duplicate entry") {
-                Json(json!({ "status": "error", "message": "Cet email est déjà utilisé" }))
+                (StatusCode::CONFLICT, Json(json!({ "error": "Cet email est déjà utilisé" }))).into_response()
             } else {
-                Json(json!({ "status": "error", "message": "Erreur lors de la création du compte" }))
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur lors de la création du compte" }))).into_response()
             }
         }
     }

@@ -23,8 +23,14 @@ pub async fn send_point(
     headers: HeaderMap,
     Json(body): Json<PostPoint>,
 ) -> impl IntoResponse {
-    if let Err(response) = extract_user_id(&headers) {
+    if let Err(response) = extract_user_id(&headers, &state.jwt_secret) {
         return response;
+    }
+
+    if body.point <= 0 || body.point > 10_000 {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Le montant doit être compris entre 1 et 10 000 points"
+        }))).into_response();
     }
 
     let update_result = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
@@ -61,7 +67,6 @@ pub async fn send_point(
         .execute(&state.db)
         .await;
 
-    // Enregistrer la transaction
     let tx_id = Uuid::new_v4();
     let label = format!("Ajout de {} points", body.point);
     let _ = sqlx::query("INSERT INTO transactions (id, user_id, points, label) VALUES (?, ?, ?, ?)")
@@ -84,7 +89,7 @@ pub async fn get_user_points(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(id) => id,
         Err(r) => return r,
     };
@@ -106,23 +111,22 @@ pub async fn get_user_points(
 }
 
 pub async fn get_qrcode_token(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(id) => id,
         Err(r) => return r,
     };
 
     let expiration = Utc::now()
         .checked_add_signed(Duration::minutes(10))
-        .unwrap()
+        .expect("Overflow date impossible")
         .timestamp() as usize;
 
     let claims = Claims { sub: user_id.to_string(), exp: expiration, role: None };
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
 
-    match encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())) {
+    match encode(&Header::default(), &claims, &EncodingKey::from_secret(state.jwt_secret.as_bytes())) {
         Ok(token) => (StatusCode::OK, Json(json!({ "token": token, "expires_in": 600 }))).into_response(),
         Err(_)    => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur génération token" }))).into_response(),
     }

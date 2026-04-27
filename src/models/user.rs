@@ -2,6 +2,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
+use validator::Validate;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Rank {
@@ -53,19 +54,27 @@ pub struct User {
     pub role: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct LoginRequest {
+    #[validate(email(message = "Adresse email invalide"))]
     pub email: String,
+    #[validate(length(min = 1, message = "Le mot de passe ne peut pas être vide"))]
     pub password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RegisterUser {
+    #[validate(length(min = 1, max = 50, message = "Le nom doit contenir entre 1 et 50 caractères"))]
     pub last_name: String,
+    #[validate(length(min = 1, max = 50, message = "Le prénom doit contenir entre 1 et 50 caractères"))]
     pub first_name: String,
+    #[validate(length(min = 1, max = 50, message = "Le pseudo doit contenir entre 1 et 50 caractères"))]
     pub pseudo: String,
+    #[validate(email(message = "Adresse email invalide"))]
     pub email: String,
+    #[validate(length(min = 8, max = 72, message = "Le mot de passe doit contenir entre 8 et 72 caractères"))]
     pub password: String,
+    #[validate(length(min = 10, max = 20, message = "Le numéro de téléphone doit contenir entre 10 et 20 chiffres"))]
     pub phone: String,
 }
 

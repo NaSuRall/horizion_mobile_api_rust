@@ -16,16 +16,16 @@ pub fn calculate_rank(points: i32) -> &'static str {
     }
 }
 
-pub fn extract_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Response> {
-    let claims = decode_claims(headers)?;
+pub fn extract_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, axum::response::Response> {
+    let claims = decode_claims(headers, secret)?;
     Uuid::parse_str(&claims.sub).map_err(|_| (
         StatusCode::BAD_REQUEST,
         Json(json!({ "error": "UUID invalide dans le token" })),
     ).into_response())
 }
 
-pub fn extract_admin_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response::Response> {
-    let claims = decode_claims(headers)?;
+pub fn extract_admin_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, axum::response::Response> {
+    let claims = decode_claims(headers, secret)?;
 
     if claims.role.as_deref() != Some("admin") {
         return Err((
@@ -40,7 +40,7 @@ pub fn extract_admin_user_id(headers: &HeaderMap) -> Result<Uuid, axum::response
     ).into_response())
 }
 
-fn decode_claims(headers: &HeaderMap) -> Result<Claims, axum::response::Response> {
+fn decode_claims(headers: &HeaderMap, secret: &str) -> Result<Claims, axum::response::Response> {
     let auth_header = match headers.get("Authorization") {
         Some(val) => val.to_str().unwrap_or(""),
         None => return Err((
@@ -57,7 +57,6 @@ fn decode_claims(headers: &HeaderMap) -> Result<Claims, axum::response::Response
         ).into_response()),
     };
 
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET manquant dans .env");
     decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),

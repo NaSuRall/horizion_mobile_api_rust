@@ -97,7 +97,7 @@ pub async fn google_auth(
 
     match full_user {
         Ok(u) => {
-            let token = generate_token(user_id.to_string(), u.role.clone());
+            let token = generate_token(user_id.to_string(), u.role.clone(), &state.jwt_secret);
             (StatusCode::OK, Json(json!({ "token": token, "user": u }))).into_response()
         }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur récupération utilisateur" }))).into_response(),

@@ -9,6 +9,7 @@ use crate::routes;
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::Pool<sqlx::MySql>,
+    pub jwt_secret: String,
 }
 
 #[tokio::main]
@@ -27,7 +28,8 @@ pub async fn main() {
         .await
         .expect("Impossible d'appliquer les migrations");
 
-    let state = AppState { db };
+    let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET non trouvé dans .env");
+    let state = AppState { db, jwt_secret };
 
     let address = env::var("SERVER_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string());
     let port = env::var("SERVER_PORT").unwrap_or_else(|_| "4000".to_string());

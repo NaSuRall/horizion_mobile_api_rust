@@ -11,7 +11,7 @@ pub async fn get_user_transactions(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers) {
+    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
         Ok(id) => id,
         Err(r) => return r,
     };
