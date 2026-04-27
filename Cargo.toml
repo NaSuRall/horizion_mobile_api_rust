@@ -29,3 +29,4 @@ stringprep = "=0.1.4"
 url = "=2.4.1"
 validator = { version = "0.18", features = ["derive"] }
 thiserror = "1"
+tower_governor = { version = "0.8", features = ["axum"] }
