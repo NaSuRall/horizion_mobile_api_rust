@@ -28,6 +28,7 @@ pub async fn send_point(
     }
 
     if body.point <= 0 || body.point > 10_000 {
+        tracing::warn!(user_id = %body.id, points = body.point, "Montant de points hors limites");
         return (StatusCode::BAD_REQUEST, Json(json!({
             "error": "Le montant doit être compris entre 1 et 10 000 points"
         }))).into_response();
@@ -41,9 +42,11 @@ pub async fn send_point(
 
     match update_result {
         Ok(r) if r.rows_affected() == 0 => {
+            tracing::warn!(user_id = %body.id, "send_point : utilisateur introuvable");
             return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response();
         }
-        Err(_) => {
+        Err(e) => {
+            tracing::error!(user_id = %body.id, "Erreur DB update points : {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
         }
         Ok(_) => {}
@@ -55,7 +58,10 @@ pub async fn send_point(
         .await
     {
         Ok(r)  => r,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
+        Err(e) => {
+            tracing::error!(user_id = %body.id, "Erreur DB lecture points : {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
+        }
     };
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -76,6 +82,8 @@ pub async fn send_point(
         .bind(&label)
         .execute(&state.db)
         .await;
+
+    tracing::info!(user_id = %body.id, points = body.point, total = new_total, rank = new_rank, "Points ajoutés");
 
     (StatusCode::OK, Json(json!({
         "status":  "success",

@@ -97,9 +97,15 @@ pub async fn admin_scan(
     ) {
         Ok(data) => match Uuid::parse_str(&data.claims.sub) {
             Ok(id) => id,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Token QR invalide" }))).into_response(),
+            Err(_) => {
+                tracing::warn!("admin_scan : UUID invalide dans le token QR");
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Token QR invalide" }))).into_response();
+            }
         },
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "QR code invalide ou expiré" }))).into_response(),
+        Err(e) => {
+            tracing::warn!("admin_scan : QR token invalide ou expiré : {}", e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "QR code invalide ou expiré" }))).into_response();
+        }
     };
 
     match sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
@@ -109,9 +115,13 @@ pub async fn admin_scan(
         .await
     {
         Ok(r) if r.rows_affected() == 0 => {
+            tracing::warn!(customer_id = %customer_id, "admin_scan : client introuvable");
             return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response();
         }
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
+        Err(e) => {
+            tracing::error!(customer_id = %customer_id, "admin_scan : erreur DB update points : {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
+        }
         Ok(_) => {}
     }
 
@@ -121,7 +131,10 @@ pub async fn admin_scan(
         .await
     {
         Ok(r) => r,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
+        Err(e) => {
+            tracing::error!(customer_id = %customer_id, "admin_scan : erreur DB lecture points : {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
+        }
     };
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -142,6 +155,8 @@ pub async fn admin_scan(
         .bind(&label)
         .execute(&state.db)
         .await;
+
+    tracing::info!(customer_id = %customer_id, amount = body.amount, total = new_total, rank = new_rank, "Admin scan : points ajoutés");
 
     (StatusCode::OK, Json(json!({
         "status":  "success",
@@ -178,8 +193,14 @@ pub async fn admin_validate_redemption(
             let reward_name: String = row.try_get("reward_name").unwrap_or_default();
 
             match status.as_str() {
-                "used"    => (StatusCode::CONFLICT, Json(json!({ "error": "Code déjà utilisé" }))).into_response(),
-                "expired" => (StatusCode::GONE,     Json(json!({ "error": "Code expiré" }))).into_response(),
+                "used" => {
+                    tracing::warn!(code = %body.code, "Validation code déjà utilisé");
+                    (StatusCode::CONFLICT, Json(json!({ "error": "Code déjà utilisé" }))).into_response()
+                }
+                "expired" => {
+                    tracing::warn!(code = %body.code, "Validation code expiré");
+                    (StatusCode::GONE, Json(json!({ "error": "Code expiré" }))).into_response()
+                }
                 _ => {
                     let _ = sqlx::query(
                         "UPDATE redemptions SET status = 'used', used_at = NOW() WHERE code = ?",
@@ -187,6 +208,8 @@ pub async fn admin_validate_redemption(
                     .bind(&body.code)
                     .execute(&state.db)
                     .await;
+
+                    tracing::info!(code = %body.code, reward = %reward_name, "Code de rédemption validé");
 
                     (StatusCode::OK, Json(json!({
                         "status":  "success",

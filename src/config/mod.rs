@@ -1,8 +1,10 @@
 use dotenvy::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
+use std::net::SocketAddr;
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::services::ServeDir;
+use tracing_subscriber::{EnvFilter, fmt};
 
 use crate::routes;
 
@@ -14,6 +16,13 @@ pub struct AppState {
 
 #[tokio::main]
 pub async fn main() {
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
     dotenv().ok();
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL non trouvé");
@@ -23,10 +32,14 @@ pub async fn main() {
         .await
         .expect("Impossible de se connecter à MySQL");
 
+    tracing::info!("Connexion MySQL établie");
+
     sqlx::migrate!()
         .run(&db)
         .await
         .expect("Impossible d'appliquer les migrations");
+
+    tracing::info!("Migrations appliquées");
 
     let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET non trouvé dans .env");
     let state = AppState { db, jwt_secret };
@@ -47,7 +60,9 @@ pub async fn main() {
 
     let listener = tokio::net::TcpListener::bind(&server_addr).await.unwrap();
 
-    println!("Server running on {}", server_addr);
+    tracing::info!("Serveur démarré sur {}", server_addr);
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .unwrap();
 }

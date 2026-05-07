@@ -3,6 +3,9 @@ name = "horizon_api_rust"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 axum = "0.8.8"
 chrono = { version = "0.4", features = ["serde"] }
@@ -30,3 +33,9 @@ url = "=2.4.1"
 validator = { version = "0.18", features = ["derive"] }
 thiserror = "1"
 tower_governor = { version = "0.8", features = ["axum"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

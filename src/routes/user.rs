@@ -4,6 +4,17 @@ use axum::{Router, routing::{get, post, put}};
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use crate::handlers::{login, register, user, transaction, event};
 
+/// Routeur sans rate-limiting — utilisé dans les tests d'intégration.
+pub fn routes_test() -> Router<AppState> {
+    Router::new()
+        .route("/login",             post(login::login))
+        .route("/register",          post(register::register))
+        .route("/user/{id}",         get(user::get_user))
+        .route("/user/{id}",         put(user::put_user))
+        .route("/user/transactions", get(transaction::get_user_transactions))
+        .route("/events",            get(event::get_events))
+}
+
 pub fn routes() -> Router<AppState> {
     // 5 tentatives par minute par IP, puis 1 toutes les 12s
     let login_governor = Arc::new(

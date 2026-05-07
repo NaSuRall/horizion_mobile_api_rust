@@ -21,6 +21,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .and_then(|err| err.message.as_ref())
             .map(|cow| cow.to_string())
             .unwrap_or_else(|| "Données invalides".to_string());
+        tracing::warn!(email = %body.email, "Tentative de login invalide : {}", first_msg);
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": first_msg }))).into_response();
     }
 
@@ -35,14 +36,21 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
         Ok(Some(user)) => {
             let password_hash = match user.password.as_deref() {
                 Some(p) => p.to_string(),
-                None => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Email ou mot de passe incorrect" }))).into_response(),
+                None => {
+                    tracing::warn!(email = %body.email, "Tentative login sur compte Google (pas de password)");
+                    return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Email ou mot de passe incorrect" }))).into_response();
+                }
             };
             let parsed_hash = match PasswordHash::new(&password_hash) {
                 Ok(h) => h,
-                Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur serveur" }))).into_response(),
+                Err(e) => {
+                    tracing::error!(email = %body.email, "Hash argon2 invalide en DB : {}", e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur serveur" }))).into_response();
+                }
             };
 
             if Argon2::default().verify_password(body.password.as_bytes(), &parsed_hash).is_err() {
+                tracing::warn!(email = %body.email, "Mot de passe incorrect");
                 return (StatusCode::UNAUTHORIZED, Json(json!({
                     "error": "Email ou mot de passe incorrect"
                 }))).into_response();
@@ -57,22 +65,32 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 
             match full_user {
                 Ok(full_user) => {
+                    tracing::info!(email = %body.email, user_id = %user.id, "Login réussi");
                     let token = generate_token(user.id.to_string(), full_user.role.clone(), &state.jwt_secret);
                     (StatusCode::OK, Json(json!({ "token": token, "user": full_user }))).into_response()
                 }
-                Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-                    "error": "Impossible de récupérer l'utilisateur"
-                }))).into_response(),
+                Err(e) => {
+                    tracing::error!(user_id = %user.id, "Erreur récupération user après login : {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                        "error": "Impossible de récupérer l'utilisateur"
+                    }))).into_response()
+                }
             }
         }
 
-        Ok(None) => (StatusCode::UNAUTHORIZED, Json(json!({
-            "error": "Email ou mot de passe incorrect"
-        }))).into_response(),
+        Ok(None) => {
+            tracing::warn!(email = %body.email, "Email introuvable");
+            (StatusCode::UNAUTHORIZED, Json(json!({
+                "error": "Email ou mot de passe incorrect"
+            }))).into_response()
+        }
 
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-            "error": "Une erreur est survenue"
-        }))).into_response(),
+        Err(e) => {
+            tracing::error!("Erreur DB lors du login : {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "error": "Une erreur est survenue"
+            }))).into_response()
+        }
     }
 }
 
