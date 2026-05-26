@@ -7,3 +7,4 @@ pub mod event;
 pub mod reward;
 pub mod admin;
 pub mod oauth;
+pub mod password_reset;
