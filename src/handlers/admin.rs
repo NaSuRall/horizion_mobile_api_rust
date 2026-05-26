@@ -89,10 +89,12 @@ pub async fn admin_scan(
 
     let customer_id = decode_qr_token(&body.qr_token, &state.jwt_secret)?;
 
+    let mut tx = state.db.begin().await?;
+
     let update = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
         .bind(body.amount)
         .bind(customer_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
     if update.rows_affected() == 0 {
@@ -102,7 +104,7 @@ pub async fn admin_scan(
 
     let row = sqlx::query("SELECT point FROM users WHERE id = ?")
         .bind(customer_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -111,7 +113,7 @@ pub async fn admin_scan(
     sqlx::query("UPDATE users SET `rank` = ? WHERE id = ?")
         .bind(new_rank)
         .bind(customer_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
     let tx_id = Uuid::new_v4();
@@ -121,8 +123,10 @@ pub async fn admin_scan(
         .bind(customer_id)
         .bind(body.amount)
         .bind(&label)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
 
     tracing::info!(customer_id = %customer_id, amount = body.amount, total = new_total, rank = new_rank, "Admin scan : points ajoutés");
 

@@ -33,10 +33,12 @@ pub async fn send_point(
         ));
     }
 
+    let mut tx = state.db.begin().await?;
+
     let update = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
         .bind(body.point)
         .bind(body.id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
     if update.rows_affected() == 0 {
@@ -46,7 +48,7 @@ pub async fn send_point(
 
     let row = sqlx::query("SELECT point FROM users WHERE id = ?")
         .bind(body.id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
@@ -55,7 +57,7 @@ pub async fn send_point(
     sqlx::query("UPDATE users SET `rank` = ? WHERE id = ?")
         .bind(new_rank)
         .bind(body.id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
 
     let tx_id = Uuid::new_v4();
@@ -65,8 +67,10 @@ pub async fn send_point(
         .bind(body.id)
         .bind(body.point)
         .bind(&label)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
 
     tracing::info!(user_id = %body.id, points = body.point, total = new_total, rank = new_rank, "Points ajoutés");
 

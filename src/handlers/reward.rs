@@ -33,46 +33,77 @@ pub async fn redeem_reward(
 ) -> Result<impl IntoResponse, ApiError> {
     let user_id = extract_user_id(&headers, &state.jwt_secret)?;
 
+    let mut tx = state.db.begin().await?;
+
     let reward = sqlx::query_as::<_, Reward>(
         "SELECT id, name, description, image_url, point_cost, stock, active
          FROM rewards WHERE id = ? AND active = 1",
     )
     .bind(reward_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(ApiError::NotFound)?;
 
-    if reward.stock == 0 {
-        return Err(ApiError::Conflict("Récompense épuisée".into()));
-    }
+    // 1. Décrément atomique des points utilisateur (rejet si solde insuffisant)
+    let points_update = sqlx::query(
+        "UPDATE users SET point = point - ? WHERE id = ? AND point >= ?",
+    )
+    .bind(reward.point_cost)
+    .bind(user_id)
+    .bind(reward.point_cost)
+    .execute(&mut *tx)
+    .await?;
 
-    let user_points: i32 = sqlx::query("SELECT point FROM users WHERE id = ?")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or(ApiError::NotFound)?
-        .try_get::<Option<i32>, _>("point")
-        .ok()
-        .flatten()
-        .unwrap_or(0);
-
-    if user_points < reward.point_cost {
+    if points_update.rows_affected() == 0 {
+        // Désambiguïsation : utilisateur introuvable vs points insuffisants
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if !exists {
+            return Err(ApiError::NotFound);
+        }
+        // Lecture des points actuels uniquement pour le message d'erreur
+        let current: i32 = sqlx::query_scalar("SELECT point FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
         return Err(ApiError::BadRequest(format!(
             "Points insuffisants ({} requis, {} disponibles)",
-            reward.point_cost, user_points
+            reward.point_cost, current
         )));
     }
 
-    let code = generate_code();
-    let new_points = user_points - reward.point_cost;
+    // 2. Décrément atomique du stock (rejet si épuisé entre-temps).
+    //    stock = -1 signifie illimité — on ne décrémente pas mais on ne rejette pas.
+    if reward.stock > 0 {
+        let stock_update = sqlx::query(
+            "UPDATE rewards SET stock = stock - 1 WHERE id = ? AND stock > 0",
+        )
+        .bind(reward_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if stock_update.rows_affected() == 0 {
+            return Err(ApiError::Conflict("Récompense épuisée".into()));
+        }
+    }
+
+    // 3. Calcul du nouveau rang à partir du solde post-décrément
+    let new_points: i32 = sqlx::query_scalar("SELECT point FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
     let new_rank = calculate_rank(new_points);
 
-    sqlx::query("UPDATE users SET point = point - ?, `rank` = ? WHERE id = ?")
-        .bind(reward.point_cost)
+    sqlx::query("UPDATE users SET `rank` = ? WHERE id = ?")
         .bind(new_rank)
         .bind(user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+
+    // 4. Génération du code + insertion redemption + transaction
+    let code = generate_code();
 
     let redemption_id = Uuid::new_v4();
     sqlx::query(
@@ -82,15 +113,8 @@ pub async fn redeem_reward(
     .bind(user_id)
     .bind(reward_id)
     .bind(&code)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
-
-    if reward.stock > 0 {
-        sqlx::query("UPDATE rewards SET stock = stock - 1 WHERE id = ?")
-            .bind(reward_id)
-            .execute(&state.db)
-            .await?;
-    }
 
     let tx_id = Uuid::new_v4();
     let label = format!("Échange : {}", reward.name);
@@ -101,8 +125,10 @@ pub async fn redeem_reward(
     .bind(user_id)
     .bind(-reward.point_cost)
     .bind(&label)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(Json(json!({
         "code":             code,
