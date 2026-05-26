@@ -20,6 +20,8 @@ use crate::models::user::{AuthUser, LoginRequest, User};
 
 pub const ACCESS_TOKEN_LIFETIME_MINUTES: i64 = 60;
 pub const REFRESH_TOKEN_LIFETIME_DAYS: i64 = 30;
+const MAX_LOGIN_ATTEMPTS: i32 = 5;
+const LOCKOUT_DURATION_MINUTES: i64 = 15;
 
 pub async fn login(
     State(state): State<AppState>,
@@ -32,7 +34,7 @@ pub async fn login(
     }
 
     let user = sqlx::query_as::<_, AuthUser>(
-        "SELECT id, email, password, email_verified FROM users WHERE email = ?"
+        "SELECT id, email, password, email_verified, login_attempts, locked_until FROM users WHERE email = ?"
     )
     .bind(&body.email)
     .fetch_optional(&state.db)
@@ -41,6 +43,20 @@ pub async fn login(
         tracing::warn!(email = %body.email, "Email introuvable");
         ApiError::Unauthorized
     })?;
+
+    // Vérrouillage : si locked_until > now, refuse avant même de tester le mdp.
+    if let Some(locked_until) = user.locked_until {
+        if locked_until > Utc::now() {
+            tracing::warn!(
+                email = %body.email,
+                "Login refusé — compte verrouillé jusqu'à {}",
+                locked_until
+            );
+            return Err(ApiError::BadRequest(
+                "Compte temporairement verrouillé suite à plusieurs tentatives échouées. Réessaie dans quelques minutes.".into()
+            ));
+        }
+    }
 
     let password_hash = user.password.as_deref().ok_or_else(|| {
         tracing::warn!(email = %body.email, "Tentative login sur compte Google (pas de password)");
@@ -56,8 +72,41 @@ pub async fn login(
         .verify_password(body.password.as_bytes(), &parsed_hash)
         .is_err()
     {
-        tracing::warn!(email = %body.email, "Mot de passe incorrect");
+        // Incrémente le compteur, verrouille si on dépasse le seuil.
+        let new_attempts = user.login_attempts + 1;
+        let lock_until = if new_attempts >= MAX_LOGIN_ATTEMPTS {
+            Utc::now().checked_add_signed(Duration::minutes(LOCKOUT_DURATION_MINUTES))
+        } else {
+            None
+        };
+        let _ = sqlx::query(
+            "UPDATE users SET login_attempts = ?, locked_until = ? WHERE id = ?",
+        )
+        .bind(new_attempts)
+        .bind(lock_until)
+        .bind(user.id)
+        .execute(&state.db)
+        .await;
+
+        if lock_until.is_some() {
+            tracing::warn!(email = %body.email, attempts = new_attempts, "Compte verrouillé pour {} min", LOCKOUT_DURATION_MINUTES);
+            return Err(ApiError::BadRequest(format!(
+                "Trop de tentatives échouées. Compte verrouillé pour {} minutes.",
+                LOCKOUT_DURATION_MINUTES
+            )));
+        }
+        tracing::warn!(email = %body.email, attempts = new_attempts, "Mot de passe incorrect");
         return Err(ApiError::Unauthorized);
+    }
+
+    // Login réussi : reset compteur + lock.
+    if user.login_attempts != 0 || user.locked_until.is_some() {
+        let _ = sqlx::query(
+            "UPDATE users SET login_attempts = 0, locked_until = NULL WHERE id = ?",
+        )
+        .bind(user.id)
+        .execute(&state.db)
+        .await;
     }
 
     if !user.email_verified {
@@ -100,7 +149,7 @@ pub fn generate_access_token(user_id: String, role: String, secret: &str) -> Res
         .ok_or(ApiError::Internal)?
         .timestamp() as usize;
 
-    let claims = Claims { sub: user_id, exp: expiration, role: Some(role) };
+    let claims = Claims { sub: user_id, exp: expiration, role: Some(role), jti: None };
     encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
         .map_err(|e| {
             tracing::error!("Erreur encodage JWT : {}", e);

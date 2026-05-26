@@ -110,7 +110,8 @@ pub async fn get_qrcode_token(
         .ok_or(ApiError::Internal)?
         .timestamp() as usize;
 
-    let claims = Claims { sub: user_id.to_string(), exp: expiration, role: None };
+    let jti = Uuid::new_v4().to_string();
+    let claims = Claims { sub: user_id.to_string(), exp: expiration, role: None, jti: Some(jti) };
 
     let token = encode(
         &Header::default(),

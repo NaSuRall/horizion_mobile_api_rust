@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -85,4 +85,6 @@ pub struct AuthUser {
     pub email: String,
     pub password: Option<String>,
     pub email_verified: bool,
+    pub login_attempts: i32,
+    pub locked_until: Option<DateTime<Utc>>,
 }

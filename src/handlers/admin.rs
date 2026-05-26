@@ -28,7 +28,9 @@ pub struct AdminCustomerInfoRequest {
     pub qr_token: String,
 }
 
-fn decode_qr_token(token: &str, secret: &str) -> Result<Uuid, ApiError> {
+/// Décode et valide un QR token. Renvoie (user_id, jti).
+/// Le jti est obligatoire — un token sans jti est rejeté (anti-replay).
+fn decode_qr_token(token: &str, secret: &str) -> Result<(Uuid, String), ApiError> {
     let data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
@@ -39,7 +41,15 @@ fn decode_qr_token(token: &str, secret: &str) -> Result<Uuid, ApiError> {
         ApiError::Unauthorized
     })?;
 
-    Uuid::parse_str(&data.claims.sub).map_err(|_| ApiError::BadRequest("Token QR invalide".into()))
+    let user_id = Uuid::parse_str(&data.claims.sub)
+        .map_err(|_| ApiError::BadRequest("Token QR invalide".into()))?;
+
+    let jti = data.claims.jti.ok_or_else(|| {
+        tracing::warn!("QR token sans jti — rejet (token obsolète, regénérer)");
+        ApiError::BadRequest("Token QR obsolète, regénérez-le".into())
+    })?;
+
+    Ok((user_id, jti))
 }
 
 pub async fn admin_customer_info(
@@ -48,7 +58,7 @@ pub async fn admin_customer_info(
     Json(body): Json<AdminCustomerInfoRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     extract_admin_user_id(&headers, &state.jwt_secret)?;
-    let customer_id = decode_qr_token(&body.qr_token, &state.jwt_secret)?;
+    let (customer_id, _jti) = decode_qr_token(&body.qr_token, &state.jwt_secret)?;
 
     let row = sqlx::query(
         "SELECT first_name, last_name, email, point, `rank` FROM users WHERE id = ?",
@@ -87,9 +97,20 @@ pub async fn admin_scan(
         ));
     }
 
-    let customer_id = decode_qr_token(&body.qr_token, &state.jwt_secret)?;
+    let (customer_id, jti) = decode_qr_token(&body.qr_token, &state.jwt_secret)?;
 
     let mut tx = state.db.begin().await?;
+
+    // Anti-replay : consume le jti atomiquement. INSERT IGNORE renvoie 0 rows
+    // si la PK existe déjà → QR déjà scanné, on rejette.
+    let claim = sqlx::query("INSERT IGNORE INTO used_qr_tokens (jti) VALUES (?)")
+        .bind(&jti)
+        .execute(&mut *tx)
+        .await?;
+    if claim.rows_affected() == 0 {
+        tracing::warn!(jti = %jti, customer_id = %customer_id, "Tentative de réutilisation d'un QR token déjà scanné");
+        return Err(ApiError::Conflict("Ce QR code a déjà été utilisé. Demandez-en un nouveau.".into()));
+    }
 
     let update = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
         .bind(body.amount)

@@ -166,7 +166,8 @@ pub async fn confirm_password_reset(
 
     let mut tx = state.db.begin().await?;
 
-    sqlx::query("UPDATE users SET password = ? WHERE id = ?")
+    // Reset password + déverrouillage (l'utilisateur prouve l'accès à son email).
+    sqlx::query("UPDATE users SET password = ?, login_attempts = 0, locked_until = NULL WHERE id = ?")
         .bind(&new_hash)
         .bind(user_id)
         .execute(&mut *tx)
