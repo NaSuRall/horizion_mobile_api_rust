@@ -29,13 +29,44 @@ impl MailerConfig {
     }
 }
 
-/// Envoie l'email en *fire-and-forget* (spawne une task tokio) pour ne pas
-/// bloquer la réponse HTTP. Loggue le résultat asynchrone.
+/// Email de reset password — fire-and-forget.
 pub fn send_password_reset(to: String, code: String) {
+    send_otp_email(
+        to,
+        code,
+        "Réinitialisation de votre mot de passe Horizon Moto",
+        "Réinitialisation de mot de passe",
+        "Vous avez demandé une réinitialisation de votre mot de passe Horizon Moto.",
+        "réinitialisation",
+        60,
+    );
+}
+
+/// Email de vérification d'inscription — fire-and-forget.
+pub fn send_email_verification(to: String, code: String) {
+    send_otp_email(
+        to,
+        code,
+        "Vérifie ton email Horizon Moto",
+        "Bienvenue chez Horizon Moto",
+        "Merci pour ton inscription. Pour activer ton compte, utilise le code ci-dessous dans l'application.",
+        "vérification",
+        15,
+    );
+}
+
+fn send_otp_email(
+    to: String,
+    code: String,
+    subject: &'static str,
+    title: &'static str,
+    intro: &'static str,
+    code_label: &'static str,
+    expire_minutes: i64,
+) {
     let Some(config) = MailerConfig::from_env() else {
         tracing::warn!(
-            email = %to,
-            code = %code,
+            email = %to, code = %code, label = %code_label,
             "Mailer mock — config SMTP absente. Code à utiliser : {}",
             code
         );
@@ -43,37 +74,52 @@ pub fn send_password_reset(to: String, code: String) {
     };
 
     tokio::spawn(async move {
-        match do_send(&config, &to, &code).await {
-            Ok(()) => tracing::info!(to = %to, "Email reset password envoyé"),
-            Err(e) => tracing::error!(to = %to, "Échec envoi email : {}", e),
+        match do_send(&config, &to, &code, subject, title, intro, code_label, expire_minutes).await {
+            Ok(()) => tracing::info!(to = %to, label = %code_label, "Email envoyé"),
+            Err(e) => tracing::error!(to = %to, label = %code_label, "Échec envoi email : {}", e),
         }
     });
 }
 
-async fn do_send(config: &MailerConfig, to: &str, code: &str) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+async fn do_send(
+    config: &MailerConfig,
+    to: &str,
+    code: &str,
+    subject: &str,
+    title: &str,
+    intro: &str,
+    code_label: &str,
+    expire_minutes: i64,
+) -> Result<(), String> {
+    let expire_text = if expire_minutes >= 60 {
+        format!("{} heure", expire_minutes / 60)
+    } else {
+        format!("{} minutes", expire_minutes)
+    };
+
     let body_text = format!(
         "Bonjour,\n\n\
-        Vous avez demandé une réinitialisation de votre mot de passe Horizon Moto.\n\n\
-        Votre code de réinitialisation : {}\n\n\
-        Ce code expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, \
-        ignorez simplement cet email.\n\n\
+        {}\n\n\
+        Votre code de {} : {}\n\n\
+        Ce code expire dans {}.\n\n\
         — L'équipe Horizon Moto",
-        code
+        intro, code_label, code, expire_text
     );
 
     let body_html = format!(
         r#"<!DOCTYPE html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:480px;margin:auto;padding:24px;color:#111">
-  <h2 style="color:#E3000F">Réinitialisation de mot de passe</h2>
+  <h2 style="color:#E3000F">{}</h2>
   <p>Bonjour,</p>
-  <p>Vous avez demandé une réinitialisation de votre mot de passe <strong>Horizon Moto</strong>.</p>
-  <p style="font-size:14px;color:#666">Votre code de vérification :</p>
+  <p>{}</p>
+  <p style="font-size:14px;color:#666">Votre code de {} :</p>
   <div style="font-size:36px;font-weight:700;letter-spacing:8px;text-align:center;background:#F5F5F5;padding:20px;border-radius:12px;color:#111">{}</div>
-  <p style="margin-top:24px;color:#666;font-size:13px">Ce code expire dans 1 heure. Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email.</p>
+  <p style="margin-top:24px;color:#666;font-size:13px">Ce code expire dans {}.</p>
   <hr style="border:none;border-top:1px solid #E5E5E5;margin:32px 0" />
   <p style="font-size:12px;color:#999">— L'équipe Horizon Moto</p>
 </body></html>"#,
-        code
+        title, intro, code_label, code, expire_text
     );
 
     let from_address = config.from.parse().map_err(|e| format!("SMTP_FROM invalide : {}", e))?;
@@ -82,7 +128,7 @@ async fn do_send(config: &MailerConfig, to: &str, code: &str) -> Result<(), Stri
     let email = Message::builder()
         .from(from_address)
         .to(to_address)
-        .subject("Réinitialisation de votre mot de passe Horizon Moto")
+        .subject(subject)
         .multipart(
             lettre::message::MultiPart::alternative()
                 .singlepart(

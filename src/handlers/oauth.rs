@@ -56,11 +56,14 @@ pub async fn google_auth(
     .await?;
 
     let user_id = if let Some(id) = existing {
-        sqlx::query("UPDATE users SET google_id = ? WHERE id = ? AND google_id IS NULL")
-            .bind(&google_user.sub)
-            .bind(id)
-            .execute(&state.db)
-            .await?;
+        // Lien Google + email vérifié (validé par Google).
+        sqlx::query(
+            "UPDATE users SET google_id = COALESCE(google_id, ?), email_verified = 1 WHERE id = ?",
+        )
+        .bind(&google_user.sub)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
         id
     } else {
         let new_id = Uuid::new_v4();
@@ -69,8 +72,8 @@ pub async fn google_auth(
         let pseudo     = google_user.email.split('@').next().unwrap_or("user");
 
         sqlx::query(
-            "INSERT INTO users (id, last_name, first_name, pseudo, email, google_id, point, `rank`, `role`)
-             VALUES (?, ?, ?, ?, ?, ?, 0, 'Bronze', 'user')",
+            "INSERT INTO users (id, last_name, first_name, pseudo, email, google_id, point, `rank`, `role`, email_verified)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 'Bronze', 'user', 1)",
         )
         .bind(new_id)
         .bind(last_name)
@@ -85,7 +88,7 @@ pub async fn google_auth(
     };
 
     let full_user = sqlx::query_as::<_, User>(
-        "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank`, `role`
+        "SELECT id, last_name, first_name, pseudo, email, password, birth_date, phone, pp, point, `rank`, `role`, email_verified
          FROM users WHERE id = ?",
     )
     .bind(user_id)

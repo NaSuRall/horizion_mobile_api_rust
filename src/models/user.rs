@@ -52,6 +52,7 @@ pub struct User {
     pub point: Option<i32>,
     pub rank: Rank,
     pub role: String,
+    pub email_verified: bool,
 }
 
 #[derive(Deserialize, Validate)]
@@ -83,4 +84,5 @@ pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
     pub password: Option<String>,
+    pub email_verified: bool,
 }

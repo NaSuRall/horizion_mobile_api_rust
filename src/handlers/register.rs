@@ -6,6 +6,7 @@ use uuid::Uuid;
 use validator::Validate;
 use crate::config::AppState;
 use crate::errors::ApiError;
+use crate::handlers::otp::create_and_send_email_verification;
 use crate::models::RegisterUser;
 
 pub async fn register(
@@ -38,9 +39,16 @@ pub async fn register(
     .execute(&state.db)
     .await?;
 
-    tracing::info!(email = %body.email, user_id = %id, "Nouveau compte créé");
+    // Envoi du code de vérification email (fire-and-forget via le mailer).
+    create_and_send_email_verification(&state.db, id, &body.email).await?;
+
+    tracing::info!(email = %body.email, user_id = %id, "Nouveau compte créé — vérification email en attente");
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "status": "success", "message": "Compte créé avec succès" })),
+        Json(json!({
+            "status":  "pending_verification",
+            "email":   body.email,
+            "message": "Compte créé. Vérifie ta boîte mail pour activer ton compte."
+        })),
     ))
 }

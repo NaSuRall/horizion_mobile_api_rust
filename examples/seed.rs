@@ -192,8 +192,8 @@ async fn insert_user(
 ) {
     sqlx::query(
         "INSERT IGNORE INTO users
-         (id, last_name, first_name, pseudo, email, password, phone, point, `rank`, `role`)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (id, last_name, first_name, pseudo, email, password, phone, point, `rank`, `role`, email_verified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
     )
     .bind(id).bind(last_name).bind(first_name).bind(pseudo).bind(email)
     .bind(password).bind(phone).bind(points).bind(rank).bind(role)
