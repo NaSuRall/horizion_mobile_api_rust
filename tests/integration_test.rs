@@ -91,9 +91,9 @@ async fn register_and_login(app: &axum::Router, email: &str, password: &str) -> 
         .unwrap();
 
     let body = body_json(res.into_body()).await;
-    body["token"]
+    body["access_token"]
         .as_str()
-        .expect("Pas de token dans la réponse de login")
+        .expect("Pas d'access_token dans la réponse de login")
         .to_string()
 }
 
@@ -283,7 +283,8 @@ async fn test_login_success() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res.into_body()).await;
-    assert!(body["token"].is_string(), "Le champ 'token' doit être présent");
+    assert!(body["access_token"].is_string(), "Le champ 'access_token' doit être présent");
+    assert!(body["refresh_token"].is_string(), "Le champ 'refresh_token' doit être présent");
     assert_eq!(body["user"]["email"], email);
 }
 

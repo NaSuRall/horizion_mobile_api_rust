@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::config::AppState;
 use crate::errors::ApiError;
 use crate::models::user::User;
-use super::login::generate_token;
+use super::login::{generate_access_token, issue_refresh_token};
 
 #[derive(Deserialize)]
 pub struct GoogleAuthRequest {
@@ -95,7 +95,12 @@ pub async fn google_auth(
     .fetch_one(&state.db)
     .await?;
 
-    let token = generate_token(user_id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let access  = generate_access_token(user_id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let refresh = issue_refresh_token(&state.db, user_id).await?;
 
-    Ok(Json(json!({ "token": token, "user": full_user })))
+    Ok(Json(json!({
+        "access_token":  access,
+        "refresh_token": refresh,
+        "user":          full_user,
+    })))
 }

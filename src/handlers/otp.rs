@@ -11,7 +11,7 @@ use uuid::Uuid;
 use validator::Validate;
 use crate::config::AppState;
 use crate::errors::ApiError;
-use crate::handlers::login::generate_token;
+use crate::handlers::login::{generate_access_token, issue_refresh_token};
 use crate::models::user::User;
 use crate::services::mail;
 
@@ -130,14 +130,16 @@ pub async fn verify_email(
     .fetch_one(&state.db)
     .await?;
 
-    let token = generate_token(user_id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let access  = generate_access_token(user_id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let refresh = issue_refresh_token(&state.db, user_id).await?;
 
     tracing::info!(user_id = %user_id, email = %body.email, "Email vérifié — auto-login");
 
     Ok(Json(json!({
-        "status": "success",
-        "token":  token,
-        "user":   full_user,
+        "status":        "success",
+        "access_token":  access,
+        "refresh_token": refresh,
+        "user":          full_user,
     })))
 }
 

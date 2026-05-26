@@ -6,13 +6,20 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::{Duration, Utc};
+use rand::RngCore;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use jsonwebtoken::{encode, Header, EncodingKey};
+use sqlx::MySqlPool;
+use uuid::Uuid;
 use validator::Validate;
 use crate::errors::ApiError;
 use crate::handlers::otp::create_and_send_email_verification;
 use crate::models::claim::Claims;
 use crate::models::user::{AuthUser, LoginRequest, User};
+
+pub const ACCESS_TOKEN_LIFETIME_MINUTES: i64 = 60;
+pub const REFRESH_TOKEN_LIFETIME_DAYS: i64 = 30;
 
 pub async fn login(
     State(state): State<AppState>,
@@ -53,8 +60,6 @@ pub async fn login(
         return Err(ApiError::Unauthorized);
     }
 
-    // Email pas encore vérifié → on renvoie un 403 explicite avec un nouveau code
-    // pour que le front puisse afficher directement l'écran de vérification.
     if !user.email_verified {
         tracing::info!(email = %body.email, "Login refusé : email non vérifié, envoi d'un nouveau code");
         let _ = create_and_send_email_verification(&state.db, user.id, &body.email).await;
@@ -75,15 +80,23 @@ pub async fn login(
     .fetch_one(&state.db)
     .await?;
 
-    let token = generate_token(user.id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let access = generate_access_token(user.id.to_string(), full_user.role.clone(), &state.jwt_secret)?;
+    let refresh = issue_refresh_token(&state.db, user.id).await?;
+
     tracing::info!(email = %body.email, user_id = %user.id, "Login réussi");
 
-    Ok(Json(json!({ "token": token, "user": full_user })).into_response())
+    Ok(Json(json!({
+        "access_token":  access,
+        "refresh_token": refresh,
+        "user":          full_user,
+    })).into_response())
 }
 
-pub fn generate_token(user_id: String, role: String, secret: &str) -> Result<String, ApiError> {
+/// Token d'accès court (60 min). Stocké uniquement côté client en mémoire/
+/// SecureStore, renouvelé via le refresh token.
+pub fn generate_access_token(user_id: String, role: String, secret: &str) -> Result<String, ApiError> {
     let expiration = Utc::now()
-        .checked_add_signed(Duration::days(30))
+        .checked_add_signed(Duration::minutes(ACCESS_TOKEN_LIFETIME_MINUTES))
         .ok_or(ApiError::Internal)?
         .timestamp() as usize;
 
@@ -93,4 +106,35 @@ pub fn generate_token(user_id: String, role: String, secret: &str) -> Result<Str
             tracing::error!("Erreur encodage JWT : {}", e);
             ApiError::Internal
         })
+}
+
+/// Génère un refresh token opaque (32 bytes hex), persiste son hash SHA-256
+/// en base et retourne la valeur brute (à n'envoyer qu'une fois au client).
+pub async fn issue_refresh_token(db: &MySqlPool, user_id: Uuid) -> Result<String, ApiError> {
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let token: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
+    let token_hash = hash_refresh_token(&token);
+
+    let expires_at = Utc::now()
+        .checked_add_signed(Duration::days(REFRESH_TOKEN_LIFETIME_DAYS))
+        .ok_or(ApiError::Internal)?;
+
+    sqlx::query(
+        "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .execute(db)
+    .await?;
+
+    Ok(token)
+}
+
+pub fn hash_refresh_token(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
 }

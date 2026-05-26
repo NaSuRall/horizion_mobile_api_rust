@@ -3,7 +3,7 @@ use crate::config::AppState;
 use axum::Router;
 use axum::routing::post;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
-use crate::handlers::{oauth, otp, password_reset};
+use crate::handlers::{auth_token, oauth, otp, password_reset};
 pub mod user;
 pub mod point;
 pub mod reward;
@@ -26,6 +26,8 @@ pub fn create_router() -> Router<AppState> {
         .route("/api/auth/google",        post(oauth::google_auth))
         .route("/api/auth/verify-email",  post(otp::verify_email))
         .route("/api/auth/resend-code",   post(otp::resend_verification_code))
+        .route("/api/auth/refresh",       post(auth_token::refresh_token))
+        .route("/api/auth/logout",        post(auth_token::logout))
         .merge(reset_request_route)
         .route("/api/password-reset/verify",  post(password_reset::verify_reset_code))
         .route("/api/password-reset/confirm", post(password_reset::confirm_password_reset))
@@ -40,6 +42,8 @@ pub fn create_test_router() -> Router<AppState> {
         .route("/api/auth/google",        post(oauth::google_auth))
         .route("/api/auth/verify-email",  post(otp::verify_email))
         .route("/api/auth/resend-code",   post(otp::resend_verification_code))
+        .route("/api/auth/refresh",       post(auth_token::refresh_token))
+        .route("/api/auth/logout",        post(auth_token::logout))
         .route("/api/password-reset/request", post(password_reset::request_password_reset))
         .route("/api/password-reset/verify",  post(password_reset::verify_reset_code))
         .route("/api/password-reset/confirm", post(password_reset::confirm_password_reset))
