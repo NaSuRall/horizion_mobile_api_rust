@@ -5,33 +5,27 @@ use serde_json::json;
 use uuid::Uuid;
 use validator::Validate;
 use crate::config::AppState;
+use crate::errors::ApiError;
 use crate::models::RegisterUser;
 
-pub async fn register(State(state): State<AppState>, Json(body): Json<RegisterUser>) -> impl IntoResponse {
-    if let Err(e) = body.validate() {
-        let first_msg = e.field_errors()
-            .values()
-            .flat_map(|v| v.iter())
-            .next()
-            .and_then(|err| err.message.as_ref())
-            .map(|cow| cow.to_string())
-            .unwrap_or_else(|| "Données invalides".to_string());
-        tracing::warn!(email = %body.email, "Inscription invalide : {}", first_msg);
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": first_msg }))).into_response();
-    }
+pub async fn register(
+    State(state): State<AppState>,
+    Json(body): Json<RegisterUser>,
+) -> Result<impl IntoResponse, ApiError> {
+    body.validate()?;
 
     let salt = SaltString::generate(&mut OsRng);
-    let password_hash = match Argon2::default().hash_password(body.password.as_bytes(), &salt) {
-        Ok(hash) => hash.to_string(),
-        Err(e) => {
+    let password_hash = Argon2::default()
+        .hash_password(body.password.as_bytes(), &salt)
+        .map_err(|e| {
             tracing::error!(email = %body.email, "Erreur hash argon2 : {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur serveur" }))).into_response();
-        }
-    };
+            ApiError::Internal
+        })?
+        .to_string();
 
     let id = Uuid::new_v4();
 
-    let result = sqlx::query(
+    sqlx::query(
         "INSERT INTO users (id, last_name, first_name, pseudo, email, password, phone) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(id)
@@ -42,21 +36,11 @@ pub async fn register(State(state): State<AppState>, Json(body): Json<RegisterUs
     .bind(&password_hash)
     .bind(&body.phone)
     .execute(&state.db)
-    .await;
+    .await?;
 
-    match result {
-        Ok(_) => {
-            tracing::info!(email = %body.email, user_id = %id, "Nouveau compte créé");
-            (StatusCode::CREATED, Json(json!({ "status": "success", "message": "Compte créé avec succès" }))).into_response()
-        }
-        Err(e) => {
-            if e.to_string().contains("Duplicate entry") {
-                tracing::warn!(email = %body.email, "Tentative d'inscription avec email déjà utilisé");
-                (StatusCode::CONFLICT, Json(json!({ "error": "Cet email est déjà utilisé" }))).into_response()
-            } else {
-                tracing::error!(email = %body.email, "Erreur DB inscription : {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur lors de la création du compte" }))).into_response()
-            }
-        }
-    }
+    tracing::info!(email = %body.email, user_id = %id, "Nouveau compte créé");
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "status": "success", "message": "Compte créé avec succès" })),
+    ))
 }

@@ -1,9 +1,7 @@
-use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
-use axum::response::IntoResponse;
+use axum::http::HeaderMap;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-use serde_json::json;
 use uuid::Uuid;
+use crate::errors::ApiError;
 use crate::models::Claims;
 
 pub fn calculate_rank(points: i32) -> &'static str {
@@ -16,46 +14,30 @@ pub fn calculate_rank(points: i32) -> &'static str {
     }
 }
 
-pub fn extract_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, axum::response::Response> {
+pub fn extract_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, ApiError> {
     let claims = decode_claims(headers, secret)?;
-    Uuid::parse_str(&claims.sub).map_err(|_| (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": "UUID invalide dans le token" })),
-    ).into_response())
+    Uuid::parse_str(&claims.sub).map_err(|_| ApiError::Unauthorized)
 }
 
-pub fn extract_admin_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, axum::response::Response> {
+pub fn extract_admin_user_id(headers: &HeaderMap, secret: &str) -> Result<Uuid, ApiError> {
     let claims = decode_claims(headers, secret)?;
 
     if claims.role.as_deref() != Some("admin") {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "Accès refusé — droits administrateur requis" })),
-        ).into_response());
+        return Err(ApiError::Forbidden);
     }
 
-    Uuid::parse_str(&claims.sub).map_err(|_| (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": "UUID invalide dans le token" })),
-    ).into_response())
+    Uuid::parse_str(&claims.sub).map_err(|_| ApiError::Unauthorized)
 }
 
-fn decode_claims(headers: &HeaderMap, secret: &str) -> Result<Claims, axum::response::Response> {
-    let auth_header = match headers.get("Authorization") {
-        Some(val) => val.to_str().unwrap_or(""),
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Token manquant" })),
-        ).into_response()),
-    };
+fn decode_claims(headers: &HeaderMap, secret: &str) -> Result<Claims, ApiError> {
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(ApiError::Unauthorized)?;
 
-    let token = match auth_header.strip_prefix("Bearer ") {
-        Some(t) => t,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Format de token invalide" })),
-        ).into_response()),
-    };
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(ApiError::Unauthorized)?;
 
     decode::<Claims>(
         token,
@@ -63,8 +45,5 @@ fn decode_claims(headers: &HeaderMap, secret: &str) -> Result<Claims, axum::resp
         &Validation::new(Algorithm::HS256),
     )
     .map(|data| data.claims)
-    .map_err(|_| (
-        StatusCode::UNAUTHORIZED,
-        Json(json!({ "error": "Token invalide ou expiré" })),
-    ).into_response())
+    .map_err(|_| ApiError::Unauthorized)
 }

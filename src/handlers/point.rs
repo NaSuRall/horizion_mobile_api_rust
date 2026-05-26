@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::Json;
 use axum::response::IntoResponse;
 use chrono::{Duration, Utc};
@@ -9,6 +9,7 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 use crate::config::AppState;
+use crate::errors::ApiError;
 use crate::models::Claims;
 use crate::utils::{calculate_rank, extract_user_id};
 
@@ -22,120 +23,100 @@ pub async fn send_point(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(body): Json<PostPoint>,
-) -> impl IntoResponse {
-    if let Err(response) = extract_user_id(&headers, &state.jwt_secret) {
-        return response;
-    }
+) -> Result<impl IntoResponse, ApiError> {
+    extract_user_id(&headers, &state.jwt_secret)?;
 
     if body.point <= 0 || body.point > 10_000 {
         tracing::warn!(user_id = %body.id, points = body.point, "Montant de points hors limites");
-        return (StatusCode::BAD_REQUEST, Json(json!({
-            "error": "Le montant doit être compris entre 1 et 10 000 points"
-        }))).into_response();
+        return Err(ApiError::BadRequest(
+            "Le montant doit être compris entre 1 et 10 000 points".into(),
+        ));
     }
 
-    let update_result = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
+    let update = sqlx::query("UPDATE users SET point = point + ? WHERE id = ?")
         .bind(body.point)
         .bind(body.id)
         .execute(&state.db)
-        .await;
+        .await?;
 
-    match update_result {
-        Ok(r) if r.rows_affected() == 0 => {
-            tracing::warn!(user_id = %body.id, "send_point : utilisateur introuvable");
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response();
-        }
-        Err(e) => {
-            tracing::error!(user_id = %body.id, "Erreur DB update points : {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
-        }
-        Ok(_) => {}
+    if update.rows_affected() == 0 {
+        tracing::warn!(user_id = %body.id, "send_point : utilisateur introuvable");
+        return Err(ApiError::NotFound);
     }
 
-    let row = match sqlx::query("SELECT point FROM users WHERE id = ?")
+    let row = sqlx::query("SELECT point FROM users WHERE id = ?")
         .bind(body.id)
         .fetch_one(&state.db)
-        .await
-    {
-        Ok(r)  => r,
-        Err(e) => {
-            tracing::error!(user_id = %body.id, "Erreur DB lecture points : {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response();
-        }
-    };
+        .await?;
 
     let new_total: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
     let new_rank = calculate_rank(new_total);
 
-    let _ = sqlx::query("UPDATE users SET `rank` = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET `rank` = ? WHERE id = ?")
         .bind(new_rank)
         .bind(body.id)
         .execute(&state.db)
-        .await;
+        .await?;
 
     let tx_id = Uuid::new_v4();
     let label = format!("Ajout de {} points", body.point);
-    let _ = sqlx::query("INSERT INTO transactions (id, user_id, points, label) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO transactions (id, user_id, points, label) VALUES (?, ?, ?, ?)")
         .bind(tx_id)
         .bind(body.id)
         .bind(body.point)
         .bind(&label)
         .execute(&state.db)
-        .await;
+        .await?;
 
     tracing::info!(user_id = %body.id, points = body.point, total = new_total, rank = new_rank, "Points ajoutés");
 
-    (StatusCode::OK, Json(json!({
+    Ok(Json(json!({
         "status":  "success",
         "message": "Points ajoutés avec succès",
         "points":  new_total,
         "rank":    new_rank,
-    }))).into_response()
+    })))
 }
 
 pub async fn get_user_points(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let user_id = extract_user_id(&headers, &state.jwt_secret)?;
 
-    let row = match sqlx::query("SELECT point FROM users WHERE id = ?")
+    let row = sqlx::query("SELECT point FROM users WHERE id = ?")
         .bind(user_id)
         .fetch_one(&state.db)
-        .await
-    {
-        Ok(r)                         => r,
-        Err(sqlx::Error::RowNotFound) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "Utilisateur introuvable" }))).into_response(),
-        Err(_)                        => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
-    };
+        .await?;
 
     let points: i32 = row.try_get::<Option<i32>, _>("point").ok().flatten().unwrap_or(0);
     let rank = calculate_rank(points);
 
-    (StatusCode::OK, Json(json!({ "points": points, "rank": rank }))).into_response()
+    Ok(Json(json!({ "points": points, "rank": rank })))
 }
 
 pub async fn get_qrcode_token(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> impl IntoResponse {
-    let user_id = match extract_user_id(&headers, &state.jwt_secret) {
-        Ok(id) => id,
-        Err(r) => return r,
-    };
+) -> Result<impl IntoResponse, ApiError> {
+    let user_id = extract_user_id(&headers, &state.jwt_secret)?;
 
     let expiration = Utc::now()
         .checked_add_signed(Duration::minutes(10))
-        .expect("Overflow date impossible")
+        .ok_or(ApiError::Internal)?
         .timestamp() as usize;
 
     let claims = Claims { sub: user_id.to_string(), exp: expiration, role: None };
 
-    match encode(&Header::default(), &claims, &EncodingKey::from_secret(state.jwt_secret.as_bytes())) {
-        Ok(token) => (StatusCode::OK, Json(json!({ "token": token, "expires_in": 600 }))).into_response(),
-        Err(_)    => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur génération token" }))).into_response(),
-    }
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(state.jwt_secret.as_bytes()),
+    )
+    .map_err(|e| {
+        tracing::error!("Erreur génération QR token : {}", e);
+        ApiError::Internal
+    })?;
+
+    Ok(Json(json!({ "token": token, "expires_in": 600 })))
 }

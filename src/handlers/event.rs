@@ -1,24 +1,25 @@
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::HeaderMap;
 use axum::Json;
 use axum::response::IntoResponse;
 use chrono::Datelike;
 use serde_json::json;
 use crate::config::AppState;
+use crate::errors::ApiError;
 use crate::models::Event;
+use crate::utils::extract_user_id;
 
 pub async fn get_events(
     State(state): State<AppState>,
-) -> impl IntoResponse {
-    let events = match sqlx::query_as::<_, Event>(
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    extract_user_id(&headers, &state.jwt_secret)?;
+
+    let events = sqlx::query_as::<_, Event>(
         "SELECT id, title, location, badge, badge_type, event_date FROM events ORDER BY event_date ASC"
     )
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(e)  => e,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Erreur base de données" }))).into_response(),
-    };
+    .await?;
 
     let result: Vec<_> = events.iter().map(|e| json!({
         "id":        e.id,
@@ -31,5 +32,5 @@ pub async fn get_events(
         "year":  e.event_date.year(),
     })).collect();
 
-    (StatusCode::OK, Json(json!({ "events": result }))).into_response()
+    Ok(Json(json!({ "events": result })))
 }

@@ -1,8 +1,9 @@
+use axum::http::{HeaderValue, Method, header};
 use dotenvy::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -48,10 +49,7 @@ pub async fn main() {
     let port = env::var("SERVER_PORT").unwrap_or_else(|_| "4000".to_string());
     let server_addr = format!("{}:{}", address, port);
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let cors = build_cors_layer();
 
     let app = routes::create_router()
         .nest_service("/admin", ServeDir::new("static/admin"))
@@ -65,4 +63,32 @@ pub async fn main() {
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
+}
+
+fn build_cors_layer() -> CorsLayer {
+    let methods = [Method::GET, Method::POST, Method::PUT, Method::DELETE];
+    let headers = [header::AUTHORIZATION, header::CONTENT_TYPE];
+
+    let raw = env::var("CORS_ALLOWED_ORIGINS").unwrap_or_default();
+    let origins: Vec<HeaderValue> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<HeaderValue>().ok())
+        .collect();
+
+    if origins.is_empty() {
+        tracing::warn!("CORS_ALLOWED_ORIGINS vide — CORS ouvert à toutes origines (dev uniquement)");
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::any())
+            .allow_methods(methods)
+            .allow_headers(headers)
+    } else {
+        tracing::info!("CORS restreint aux origines : {:?}", raw);
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods(methods)
+            .allow_headers(headers)
+            .allow_credentials(true)
+    }
 }
